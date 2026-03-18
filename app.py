@@ -59,42 +59,65 @@
 #             st.text(names[i])
 #             st.image(posters[i])
 
+import os
 import joblib
 import streamlit as st
 import requests
 
+# --- 1. SET UP PATHS ---
+# This ensures Python looks in the same folder as this script for the files
+BASE_PATH = os.path.dirname(__file__)
+MOVIES_PATH = os.path.join(BASE_PATH, "movies.joblib")
+SIMILARITY_PATH = os.path.join(BASE_PATH, "similarity.joblib")
+
+# --- 2. LOAD DATA WITH CACHING ---
+# Using @st.cache_resource prevents the app from reloading 
+# heavy files every time you click a button.
+@st.cache_resource
+def load_data():
+    if not os.path.exists(MOVIES_PATH) or not os.path.exists(SIMILARITY_PATH):
+        st.error(f"Files not found! Make sure 'movies.joblib' and 'similarity.joblib' are in: {BASE_PATH}")
+        st.stop()
+    
+    movies = joblib.load(MOVIES_PATH)
+    similarity = joblib.load(SIMILARITY_PATH)
+    return movies, similarity
+
+movies, similarity = load_data()
+
+# --- 3. HELPER FUNCTIONS ---
 def fetch_poster(movie_id):
     url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key=8265bd1679663a7ea12ac168da84d2e8&language=en-US"
     try:
-        # Set a timeout so the app doesn't hang forever (e.g., 5 seconds)
         response = requests.get(url, timeout=5)
-        response.raise_for_status() # Check if the request was successful
+        response.raise_for_status()
         data = response.json()
         poster_path = data.get('poster_path')
         if poster_path:
             return "https://image.tmdb.org/t/p/w500/" + poster_path
         return "https://via.placeholder.com/500x750?text=No+Poster+Found"
-    except Exception as e:
-        # If there's a timeout or connection error, return a placeholder image
+    except Exception:
         return "https://via.placeholder.com/500x750?text=Network+Error"
 
 def recommend(movie):
+    # Get index of the selected movie
     index = movies[movies['title'] == movie].index[0]
+    # Get similarity scores and sort them
     distances = sorted(list(enumerate(similarity[index])), reverse=True, key=lambda x: x[1])
+    
     recommended_movie_names = []
     recommended_movie_posters = []
+    
+    # Get top 5 recommendations (excluding the movie itself)
     for i in distances[1:6]:
-        # fetch the movie poster
         movie_id = movies.iloc[i[0]].id
-        recommended_movie_posters.append(fetch_poster(movie_id))
         recommended_movie_names.append(movies.iloc[i[0]].title)
+        recommended_movie_posters.append(fetch_poster(movie_id))
 
-    return recommended_movie_names,recommended_movie_posters
+    return recommended_movie_names, recommended_movie_posters
 
-
+# --- 4. STREAMLIT UI ---
 st.header('Movie Recommender System')
-movies = joblib.load("movies.joblib")
-similarity = joblib.load("similarity.joblib")
 
 movie_list = movies['title'].values
 selected_movie = st.selectbox(
@@ -103,12 +126,11 @@ selected_movie = st.selectbox(
 )
 
 if st.button('Show Recommendation'):
-    recommended_movie_names,recommended_movie_posters = recommend(selected_movie)
-    
-    cols = st.columns(5) 
-    
-    for i in range(5):
-        with cols[i]:
-            st.text(recommended_movie_names[i])
-            st.image(recommended_movie_posters[i])
-            
+    with st.spinner('Fetching recommendations...'):
+        names, posters = recommend(selected_movie)
+        
+        cols = st.columns(5) 
+        for i in range(5):
+            with cols[i]:
+                st.text(names[i])
+                st.image(posters[i])
